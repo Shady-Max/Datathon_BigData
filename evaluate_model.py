@@ -1,6 +1,6 @@
 import torch
 from datasets import load_dataset, Dataset
-from evaluate_model import load
+from evaluate import load
 from transformers import RobertaForQuestionAnswering, RobertaTokenizer
 import numpy as np
 
@@ -22,10 +22,8 @@ def tokenize_function(examples):
         padding="max_length"
     )
 
-# Tokenize validation dataset
 tokenized_val = val_dataset.map(tokenize_function, batched=True)
 
-# Generate predictions
 model.eval()
 start_logits = []
 end_logits = []
@@ -36,27 +34,31 @@ with torch.no_grad():
         start_logits.append(outputs.start_logits.cpu().numpy())
         end_logits.append(outputs.end_logits.cpu().numpy())
 
-# Convert logits to indices
 predicted_start_indices = np.argmax(start_logits, axis=-1).flatten()
 predicted_end_indices = np.argmax(end_logits, axis=-1).flatten()
 
-# Post-process predictions
-predicted_answers = []
 true_answers = []
+for i in range(len(tokenized_val)):
+    # Проверяем, что есть истинные ответы
+    true_answer = val_dataset[i]["answers"]["text"]  
+    if true_answer and isinstance(true_answer, list):  # Убедитесь, что это список
+        true_answers.append(true_answer[0])  # Возьмите первый элемент
+
+# Убедитесь, что predicted_answers также содержит только строки
+predicted_answers = []
 for i in range(len(tokenized_val)):
     input_ids = tokenized_val[i]["input_ids"]
     start_idx = predicted_start_indices[i]
     end_idx = predicted_end_indices[i]
     predicted_answer = tokenizer.decode(input_ids[start_idx:end_idx+1], skip_special_tokens=True)
     predicted_answers.append(predicted_answer)
-    true_answer = val_dataset[i]["answers"]["text"][0]
-    true_answers.append(true_answer)
 
-# Load F1 and EM metrics
+assert all(isinstance(ans, str) for ans in predicted_answers), "Some predicted answers are not strings."
+assert all(isinstance(ans, str) for ans in true_answers), "Some true answers are not strings."
+
 metric_f1 = load("f1")
 metric_em = load("exact_match")
 
-# Calculate F1 and EM
 f1_score = metric_f1.compute(predictions=predicted_answers, references=true_answers)
 em_score = metric_em.compute(predictions=predicted_answers, references=true_answers)
 
